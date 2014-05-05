@@ -13,11 +13,15 @@ import spray.routing.SimpleRoutingApp
 import spray.util._
 import StatusCodes._
 
+object Timeout {
+  implicit val timeout = akka.util.Timeout(10000)
+}
+
 object Main extends App with SimpleRoutingApp  {
 
   implicit val system  = ActorSystem("my-system")
-  implicit val timeout = akka.util.Timeout(5000)
 
+  import Timeout.timeout
   import system.dispatcher
 
   val supervisor = system.actorOf(Props[Supervisor])
@@ -43,11 +47,10 @@ object Main extends App with SimpleRoutingApp  {
 class Supervisor extends Actor with ActorLogging {
   import context.system
   import context.dispatcher
+  import Timeout.timeout
 
   val router: ActorRef =
     context.actorOf(Props(classOf[Worker]).withRouter(RoundRobinRouter(nrOfInstances = 10)))
-
-  implicit val timeout = akka.util.Timeout(10000)
 
   val Extract = """^https?://(?:[^.]*\.)*?(\w+\.\w+)(?:/.*)?$""".r
 
@@ -65,17 +68,17 @@ class Supervisor extends Actor with ActorLogging {
             case Extract(secondLevel) => secondLevel
           }.map(e => (e._1, e._2.size)))
 
-      }.mapTo[Either[String, Map[String, Int]]].pipeTo(sender).onFailure {
+      }.mapTo[Either[String, Map[String, Int]]]
+       .recover  {
         case e: Throwable => Left( s"""ErrorClass: ${e.getClass()}, ErrorMessage: ${e.getMessage()}""")
-      }
+      }. pipeTo (sender)
   }
 }
 
 class Worker extends Actor with Stash with ActorLogging {
 
   import context.dispatcher
-
-  implicit val timeout = akka.util.Timeout(10000)
+  import Timeout.timeout
 
   val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
 
@@ -111,3 +114,4 @@ class Worker extends Actor with Stash with ActorLogging {
 
   case object Done
 }
+
